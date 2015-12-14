@@ -324,6 +324,16 @@ class Clean(Tool):
 
         _targets[clean_target].rebuild = True
 
+    def build(s, target):
+        for source in s.sources:
+            dprint("default", "[CLEAN]", source)
+            try:
+                os.remove(source)
+            except FileNotFoundError:
+                pass
+
+        return True
+
 builders['.c'] = CompileC
 builders['.S'] = CompileAsm
 
