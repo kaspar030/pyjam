@@ -1045,8 +1045,14 @@ if __name__ == '__main__':
     dprint("phases", "... entering parsing phase ...")
     before = time.time()
     try:
+        # set basedir to project root
         set_basedir()
+
+        # include default rules.py
+        include(os.path.join(dirname(os.path.realpath(__file__)), "rules.py"))
+
         include("project.py")
+
     except Exception as e:
         # this is the exception handler where we end up
         # on any uncatched exceptions within the buildfiles
