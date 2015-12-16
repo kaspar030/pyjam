@@ -12,7 +12,7 @@ class JobServer(object):
     def __init__(s):
         s.inQueue = Queue()
         s.outQueue = Queue()
-        s.cmdHostProcess = Process(target=JobServer.cmdloop, args=(s, s.inQueue, s.outQueue))
+        s.cmdHostProcess = Process(target=JobServer.cmdloop, args=(s, s.inQueue, s.outQueue), daemon=True)
         s.cmdHostProcess.start()
 
     def cmdloop(s, inQueue, outQueue):
