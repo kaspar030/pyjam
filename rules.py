@@ -148,6 +148,21 @@ class Module(Rule):
         else:
             return res
 
+    def iterate_modules(s, visited=None):
+        visited = visited or set()
+        if s in visited:
+            return
+        visited.add(s)
+
+        if s.used:
+            yield s
+
+        for module in s._uses:
+            module = Module._map.get(module)
+            if module and module.used:
+                for dep in module.iterate_modules(visited):
+                    yield dep
+
     def needs(s, modules, hard=True, locate=True):
         if locate:
             modules = locate_bin(str_list(listify(modules)))
@@ -166,31 +181,41 @@ class Module(Rule):
     def uses(s, modules, locate=True):
         return s.needs(modules, False, locate)
 
+    def collect_modules(s):
+        _post_parse.insert(0, (s._use, ()))
+#        _pre_build.append((Module._use_conditionals_hook, (ctx,)))
+        return s
+
+#    def _use_conditionals_hook(context):
+#        for module in context._use_if_selected or []:
+
     def use_if(s, string):
         if not ctx._use_if_list:
             ctx._use_if_list = []
-            _post_parse.append((Module.process_use_if_list, (ctx._use_if_list,)))
+            _post_parse.append((Module.process_use_if_list, (ctx,)))
         ctx._use_if_list.append((s, string))
         return s
 
-    def process_use_if_list(_use_if_list):
+    def process_use_if_list(context):
         has_changed = True
+#       context._use_if_selected = []
         while has_changed:
             new_list = []
             has_changed = False
-            for module, condition in _use_if_list:
+            for module, condition in context._use_if_list:
                 if module.used:
                     continue
                 if module._process_use_if_hook(condition):
+#                    context._use_if_selected.append(module)
                     has_changed = True
                 else:
                     new_list.append((module, condition))
             if has_changed:
-                _use_if_list = new_list
+                context._use_if_list = new_list
 
     def _process_use_if_hook(s, string):
         if not s.used:
-            #dprint("debug", "USE_IF processing", s.name, string)
+            dprint("debug", "USE_IF processing", s.name, string)
             res = Module.bool_parser.parseString(string)[0]
             if bool(res):
                 s._use()
@@ -205,7 +230,6 @@ class Module(Rule):
         dprint("debug", "_USE", s.name)
 
         s.used = True
-#        Module._used.add(s)
 
         for module_name in s._uses:
             module = Module._map.get(module_name)
@@ -223,18 +247,63 @@ class Module(Rule):
     def _process_contexts():
         for module_name, module in Module._map.items():
             if module.used:
+                dprint("debug", "_CTX processing", module.name)
                 for dep in module._uses:
+                    dprint("debug", " ctx", dep)
                     dep = Module._map.get(dep)
                     if dep:
                         if dep.used:
-                            dprint("debug", "_CTX", module.name, dep.name)
+                            dprint("debug", "+CTX", module.name, dep.name)
                             module.context._parents.append(dep.context)
+                        else:
+                            dprint("debug", "-CTX", module.name, dep.name)
+
+    def _print_module_deps():
+        print("Module dependencies:")
+
+        with open("modules.dot", "w") as f:
+            unused = []
+            print("strict digraph \"Module dependencies\" {", file=f)
+            print("concentrate=true;", file=f)
+            for module_name, module in Module._map.items():
+                if module.used:
+                    for dep in module._uses:
+                        if dep in module._uses_hard:
+                            print("\"%s\" -> \"%s\";" % (basename(module_name), basename(dep)), file=f)
+                        else:
+                            dep_obj = Module._map.get(dep)
+                            if dep_obj and dep_obj.used:
+                                print("\"%s\" -> \"%s\" [arrowhead=\"dot\"];" % (basename(module_name), basename(dep)), file=f)
+                else:
+                    unused.append(module_name)
+
+            for module_name in sorted(unused):
+                print("\"%s\";" % basename(module_name), file=f)
+
+            print("}", file=f)
 
 class ModuleDir(Module):
     def __init__(s, name, dir=None):
         dir = dir or name
         sources = glob.glob(os.path.join(dir, "*.c")) + glob.glob(os.path.join(dir, "*.S"))
         super().__init__(name, sources)
+
+class ModuleList(Rule):
+    def __init__(s, name, module):
+        super().__init__(locate(name), module)
+        t = Target.get(s.targets[0])
+        t.rebuild = True
+        t.bound = True
+        s.module = module
+
+    def build(s, target):
+        n = len(str(target.context.bindir))
+        modules = []
+        for module in s.module.iterate_modules():
+            modules.append(module.name[n+1:])
+        for module in sorted(modules):
+            print(module)
+        return True
 
 class PseudoModule(Module):
     def __init__(s, name):
@@ -265,7 +334,7 @@ class Tool(Rule):
         if s.depends_on_sources and s.targets and s.sources:
             depends(s.targets, s.sources)
         if s.clean:
-            Clean(s.targets, **kwargs)
+            Clean(s.targets)
 
     def build(s, target):
         dprint("context", "building", target.name, "with context", target.context)
@@ -310,29 +379,31 @@ class CompileAsm(ObjectCompiler):
     actions="${AS} ${ASFLAGS} %args -c %sources -o %target"
     name='AS'
 
-class Clean(Tool):
-    actions="rm -f -- %sources"
+class CleanRule(Tool):
     name="CLEAN"
     depends_on_sources=False
     clean=False
-    message="[%name] cleaning %sources"
+    _clean_list = None
 
-    def __init__(s, sources, **kwargs):
-        clean_target = relpath("clean")
-        super().__init__(clean_target, sources, **kwargs)
-        depends("clean", clean_target)
-
-        _targets[clean_target].rebuild = True
+    def __init__(s, **kwargs):
+        super().__init__("clean", [], **kwargs)
+        _targets["clean"].rebuild = True
+        CleanRule._clean_list = []
 
     def build(s, target):
-        for source in s.sources:
-            dprint("default", "[CLEAN]", source)
+        for f in CleanRule._clean_list:
+            dprint("default", "[CLEAN]", f)
             try:
-                os.remove(source)
+                os.remove(f)
             except FileNotFoundError:
                 pass
 
         return True
+
+CleanRule()
+
+def Clean(files):
+    CleanRule._clean_list.extend(listify(files))
 
 builders['.c'] = CompileC
 builders['.S'] = CompileAsm
@@ -353,16 +424,17 @@ class LinkModule(Tool):
         s.modules = listify(sources)
         super().__init__(target, **kwargs)
 
-        entry = (s.post_bind, ())
-        if not entry in _post_bind:
-            _post_bind.append(entry)
+        entry = (s.pre_build, ())
+        if not entry in _pre_build:
+            _pre_build.insert(0, entry)
 
-    def post_bind(s):
+    def pre_build(s):
         objects = []
         for module in s.modules:
             module = Module._map.get(module)
             if not module:
                 continue
+
             objects.extend(module.get_objects())
             if not module.context in s.context._parents:
                 s.context._parents.append(module.context)

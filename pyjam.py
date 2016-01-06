@@ -123,6 +123,8 @@ class Context(object):
         s._name = name # "(%i)%s" % (Context.i, name)
         Context.i+=1
         s._fields = {}
+        s._exports = set()
+        s._unexports = set()
         s._parents = copy.copy(listify(parents))
         dprint("context", "initialized new context", s, "with parents", s._parents)
 
@@ -195,6 +197,12 @@ class Context(object):
         for field in s.fields():
             print("    %s=%s" % (field, s.__getattr__(field)))
         print("}")
+
+    def _export(s, fields):
+        s._exports |= set(listify(fields))
+
+    def _unexport(s, fields):
+        s._unexports |= set(listify(fields))
 
 class Var(object):
     def __init__(s, initial=None, joiner=None, start=None):
@@ -546,7 +554,9 @@ class Target(object):
                 return False
         return True
 
-    def iterate_dependencies(s, stable=None, queued=None):
+    def iterate_dependencies(s, stable=None, queued=None, self=False):
+        if self:
+            yield s
         for dep in s.deps:
             if type(dep)==str:
                 dep = _targets[dep]
@@ -675,7 +685,7 @@ def build_targets(all=True):
         else:
             stable = True
 
-        for dep in target.iterate_dependencies(stable=stable, queued=False):
+        for dep in target.iterate_dependencies(stable=stable, queued=False, self=True):
             dprint("verbose", "... build_targets() considering", dep, dep.ndeps)
             with dep.lock:
                 if (dep.prio==-1):
@@ -731,11 +741,23 @@ def worker(queue, block=False, n=0):
 
         queue.task_done()
 
+def filter_vars(targets):
+    _tmp = targets.copy()
+    targets.clear()
+    for target in _tmp:
+        val = target.split("=")
+        if len(val) > 1:
+            os.environ[val[0]] = "=".join(val[1:])
+            dprint("env", "overriding env from cmdline:", val[0], "=", os.environ[val[0]])
+        else:
+            targets.append(target)
+    if not targets:
+        targets.append("all")
+
 def want_targets(targets):
     targets = listify(targets)
     for target_name in targets:
         if _start_cwd != os.getcwd():
-            print(_start_cwd, _basedir)
             target_name = os.path.join(os.path.relpath(_start_cwd, _basedir), target_name)
 
         target_name = os.path.normpath(target_name)
@@ -767,7 +789,7 @@ def parse_args():
     parser = argparse.ArgumentParser(prog='pyjam', description='A pythonic build system.')
 
     parser.add_argument('targets', metavar='target', type=str, nargs='*',
-            help='targets to build (default: all)', default="all")
+            help='targets to build (default: all)', default=["all"])
     parser.add_argument('--version', action='version', version='%(prog)s 0.1')
 
     parser.add_argument('-a', "--all", help='Build all targets, even if they are current.', action="store_true", default=False )
@@ -832,7 +854,7 @@ def include(filename):
         _var_exports = _saved_exports
         dprint("include", "Including \"%s\" done." % filename)
     except FileNotFoundError:
-        raise Exception("Error: include(): Cannot find \"%s\"! (tried: \"%s\")" % (filename, fullpath))
+        _err("include(): Cannot find \"%s\"! (tried: \"%s\")" % (filename, fullpath))
 
     last_cwd = _cwd_stack.pop()
     os.chdir(last_cwd)
@@ -911,7 +933,7 @@ def _env(context=None):
         context = ctx
 
     my_env = os.environ.copy()
-    for env in (_global_var_exports | _var_exports)-(_global_var_unexports|_var_unexports):
+    for env in (_global_var_exports | _var_exports | context._exports)-(_global_var_unexports|_var_unexports|context._unexports):
         val = context.get(env) or locals().get(env) or globals().get(env)
         if val:
             dprint("exports", "Exporting %s=%s" % (env, val))
@@ -1003,13 +1025,16 @@ def start_building(all=False):
     c = time.time()
     post_bind()
     d = time.time()
-    select_wanted(all)
+    pre_build()
     e = time.time()
-    build_targets(all)
+    select_wanted(all)
     f = time.time()
+    build_targets(all)
+    g = time.time()
 
-    dprint("times", "... times: post_parse: %.3fs binding: %.3fs, post_bind: %.3fs select_wanted: %.3fs building: %.3fs" %
-            (b-a, c-b, d-c, e-d, f-e))
+    dprint("times", "... times: post_parse: %.3fs binding: %.3fs, post_bind: %.3fs "
+                    "pre_build: %.3f sselect_wanted: %.3fs building: %.3fs" %
+            (b-a, c-b, d-c, e-d, f-e, g-f))
 
 if __name__ == '__main__':
     args = parse_args()
@@ -1024,7 +1049,6 @@ if __name__ == '__main__':
                 _shell_options.append("-x")
 
     _start_cwd = os.getcwd()
-
     _relpath = ""
 
     pp = pprint.PrettyPrinter(indent=4)
@@ -1037,9 +1061,15 @@ if __name__ == '__main__':
     # instantiate jobserver subprocess
     _job_server_pool = jobserver.JobServerPool(args.jobs or 1)
 
-    globalize([ "_prio", "_unbound_targets", "_build_queue", "_targets", "_post_parse", "_post_bind", "_pre_build"])
+    globalize(["_prio", "_unbound_targets", "_build_queue", "_targets", "_post_parse", "_post_bind", "_pre_build"])
 
+    # filter VAR=val from targets
+    filter_vars(args.targets)
+
+    #
     want_targets(args.targets)
+
+    # start subthreads
     start_workers()
 
     dprint("phases", "... entering parsing phase ...")
