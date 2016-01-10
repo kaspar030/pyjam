@@ -20,6 +20,8 @@ PhonyTarget('clean')
 
 depends('first', 'all')
 
+parsed_deps = {}
+
 def set_context(context):
     global ctx
     ctx = context
@@ -329,12 +331,13 @@ class Tool(Rule):
     depends_on_sources=True
     message="[%name] %target %sources"
 
-    def __init__(s, target, sources=[], **kwargs):
+    def __init__(s, target, sources=None, **kwargs):
+        sources = sources or []
         super().__init__(target, sources, **kwargs)
         if s.depends_on_sources and s.targets and s.sources:
             depends(s.targets, s.sources)
         if s.clean:
-            Clean(s.targets)
+            clean(s.targets)
 
     def build(s, target):
         dprint("context", "building", target.name, "with context", target.context)
@@ -362,18 +365,49 @@ class ObjectCompiler(Tool):
 
             super().__init__(obj, source, **kwargs)
 
+            try:
+                parsed_deps = s.parse_deps(source, obj[0])
+                for dep in parsed_deps or []:
+                    depends(obj, dep)
+            except AttributeError:
+                pass
+
     def extra_args(s, target):
         includes = target.context.includes
 
         return super().extra_args(target) + includes.prefix("-I")
 
-class CompileC(ObjectCompiler):
+class CompileCcommon(ObjectCompiler):
     actions="${CCACHE} ${CC} ${CFLAGS} %args -c %sources -o %target"
     name='CC'
 
+    def parse_gcc_deps(filename):
+        try:
+            alldeps = ""
+            for line in open(filename):
+                alldeps += line.rstrip().rstrip("\\")
+
+            return " ".join(alldeps.split()).split()[2:]
+
+        except FileNotFoundError:
+            pass
+
+    def parse_deps(s, source, obj):
+        depfile = os.path.join(_basedir, subst_ext(obj, '.d'))
+        clean(relbase(depfile))
+        return CompileCcommon.parse_gcc_deps(depfile)
+
     def extra_args(s, target):
         defines = target.context.defines
-        return super().extra_args(target) + defines.prefix("-D")
+        return super().extra_args(target) + ["-MMD"] + defines.prefix("-D")
+
+class CompileC(CompileCcommon):
+    actions="${CCACHE} ${CC} ${CFLAGS} %args -c %sources -o %target"
+    name='CC'
+
+class CompileCpp(CompileCcommon):
+    actions="${CCACHE} ${CXX} ${CXXFLAGS} %args -c %sources -o %target"
+    name='C++'
 
 class CompileAsm(ObjectCompiler):
     actions="${AS} ${ASFLAGS} %args -c %sources -o %target"
@@ -472,10 +506,10 @@ class Print(Rule):
         dprint("default", s.message)
         return True
 
-class Mkdir(Tool):
-    name="MKDIR"
-    actions="mkdir -p -- %target"
-    clean=False # rm -f on dir is dangerous!
+#class Mkdir(Tool):
+#    name="MKDIR"
+#    actions="mkdir -p -- %target"
+#    clean=False # rm -f on dir is dangerous!
 
 class Touch(Tool):
     name="TOUCH"

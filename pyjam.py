@@ -25,6 +25,13 @@ _non_source_targets = set()
 _wanted = []
 _wanted_names = []
 
+# housekeeping for created files and directories
+_created_files = set()
+_created_dirs = set()
+_existing_files = set() # files that pre-existed in directories pyjam tried to create
+_dir_exists = set()
+_track_leftovers = False
+
 # hooks
 _post_parse = []
 _post_bind = []
@@ -322,6 +329,7 @@ def depends(targets, deps, bind=False):
 
     for target in targets:
         for dep in deps:
+            get_unbound_target(dep)
             dprint("depends", "Depends: \"%s\" : \"%s\"" % (target, dep))
         if target in deps:
             dprint("depends", "warning: %s depends on itself!" % target)
@@ -505,7 +513,7 @@ class Target(object):
             if not s.is_needed():
                 dprint("verbose", s.name, "not needed.")
             else:
-                return True
+                return True #s.can_make()
         return False
 
     def set_stable(name):
@@ -610,6 +618,52 @@ class FileTarget(Target):
 def touch(path):
     with open(path, 'a'):
         os.utime(path, None)
+
+def clean(files):
+    global _created_files
+    files = listify(files)
+    _created_files |= set(files)
+
+def do_clean():
+    for f in _created_files:
+        print("deleting", f)
+
+def path_split(path):
+    res = []
+    while True:
+        (head, tail) = os.path.split(path)
+        if tail:
+            res.append(tail)
+        if head:
+            path = head
+        else:
+            break
+
+    tmp = ""
+    for i in range(0, len(res)):
+        tmp = os.path.join(tmp, res.pop())
+        yield(tmp)
+
+def scan_existing_files(fullpath, relpath):
+    for entry in os.scandir(fullpath):
+        if entry.is_file():
+            _existing_files.add(os.path.join(relpath, entry.name))
+
+def mkdir(dirs, start_dir=None):
+    dirs = listify(dirs)
+    for d in dirs:
+        path = os.path.relpath(d, _basedir)
+        if path in _dir_exists:
+            continue
+        if os.path.isdir(d):
+            fullpath = os.path.join(_basedir, path)
+            scan_existing_files(fullpath, path)
+        else:
+            try:
+                os.makedirs(d)
+            except Exception as e:
+                print(e)
+        _dir_exists.add(path)
 
 def subst_ext(f, new_ext):
     n, ext = os.path.splitext(f)
@@ -731,6 +785,8 @@ def worker(queue, block=False, n=0):
             with needed_for.lock:
                 if not success:
                     needed_for.missing.append(target.name)
+                    if needed_for.is_needed():
+                        dprint("default", "... skipped %s for lack of %s..." % (needed_for.name, target))
                 else:
                     needed_for.ndeps -= 1
                     if needed_for.prio != -1:
@@ -954,13 +1010,16 @@ def locate_bin(targets, context=None):
     result = []
     bindir = context.get('bindir') or relbase(os.path.join(_basedir, "bin"))
 
+    mkdir(bindir)
+
     for target in listify(targets):
         bin_path = os.path.join(bindir, target)
         result.append(bin_path)
         try:
             dirname = os.path.join(_basedir, os.path.dirname(bin_path))
             if dirname:
-                os.makedirs(dirname, exist_ok=True)
+                #print(dirname, bindir)
+                mkdir(dirname, bindir)
         except FileExistsError:
             pass
         except FileNotFoundError as e:
@@ -1017,6 +1076,7 @@ def _err(*args):
     clean_exit(1)
 
 def start_building(all=False):
+    #print("leftovers:", _existing_files-_created_files-_created_dirs)
     dprint("debug", "... start building ... (all=%s)" % all)
     a = time.time()
     post_parse()
@@ -1061,7 +1121,8 @@ if __name__ == '__main__':
     # instantiate jobserver subprocess
     _job_server_pool = jobserver.JobServerPool(args.jobs or 1)
 
-    globalize(["_prio", "_unbound_targets", "_build_queue", "_targets", "_post_parse", "_post_bind", "_pre_build"])
+    globalize(["_prio", "_unbound_targets", "_build_queue", "_targets", "_post_parse", "_post_bind", "_pre_build",
+        "_created_files",])
 
     # filter VAR=val from targets
     filter_vars(args.targets)
