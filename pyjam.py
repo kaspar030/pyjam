@@ -30,7 +30,8 @@ _created_files = set()
 _created_dirs = set()
 _existing_files = set() # files that pre-existed in directories pyjam tried to create
 _dir_exists = set()
-_track_leftovers = False
+_clean_leftovers = False
+_clean = False
 
 # hooks
 _post_parse = []
@@ -39,7 +40,7 @@ _pre_build = []
 
 # debug options
 _debug_levels = { 'error', 'warning', 'default' }
-_valid_debug_levels = {'binding', 'include', 'targets', 'depends', 'exports', 'env', 'threads', 'verbose', 'needed', 'context', 'locate', 'cause', 'commands', 'phases', 'warning', 'error', 'debug', 'times'}
+_valid_debug_levels = {'binding', 'clean', 'include', 'targets', 'depends', 'exports', 'env', 'threads', 'verbose', 'needed', 'context', 'locate', 'cause', 'commands', 'phases', 'warning', 'error', 'debug', 'times'}
 
 # variable export settings
 _var_exports = set()
@@ -626,7 +627,23 @@ def clean(files):
 
 def do_clean():
     for f in _created_files:
-        print("deleting", f)
+        try:
+            os.unlink(f)
+            dprint("clean", "... cleaned", f)
+        except Exception:
+            pass
+
+def set_clean_leftovers(val=True):
+    global _clean_leftovers
+    _clean_leftovers = val
+
+def do_clean_leftovers():
+    for f in (_existing_files-_created_files-_created_dirs):
+        try:
+            os.unlink(f)
+            dprint("clean", "... removed leftover file", f)
+        except Exception as e:
+            dprint("clean", "... error removing leftover file", f, "reason:", e)
 
 def path_split(path):
     res = []
@@ -807,7 +824,7 @@ def filter_vars(targets):
             dprint("env", "overriding env from cmdline:", val[0], "=", os.environ[val[0]])
         else:
             targets.append(target)
-    if not targets:
+    if not _clean and not targets:
         targets.append("all")
 
 def want_targets(targets):
@@ -845,10 +862,11 @@ def parse_args():
     parser = argparse.ArgumentParser(prog='pyjam', description='A pythonic build system.')
 
     parser.add_argument('targets', metavar='target', type=str, nargs='*',
-            help='targets to build (default: all)', default=["all"])
+            help='targets to build (default: all)', default=[])
     parser.add_argument('--version', action='version', version='%(prog)s 0.1')
 
     parser.add_argument('-a', "--all", help='Build all targets, even if they are current.', action="store_true", default=False )
+    parser.add_argument('-c', "--clean", help='Clean output files. (removes default "all" target)', action="store_true", default=False )
     parser.add_argument('-j', '--jobs', type=int, action='store',
             help='number of concurrent jobs (default: 1)')
     parser.add_argument('-q', "--quit", help='stop on first error', action="store_true" )
@@ -1076,8 +1094,11 @@ def _err(*args):
     clean_exit(1)
 
 def start_building(all=False):
-    #print("leftovers:", _existing_files-_created_files-_created_dirs)
-    dprint("debug", "... start building ... (all=%s)" % all)
+    if _clean:
+        do_clean()
+    if _clean_leftovers:
+        do_clean_leftovers()
+
     a = time.time()
     post_parse()
     b = time.time()
@@ -1108,6 +1129,9 @@ if __name__ == '__main__':
             if debug=="commands":
                 _shell_options.append("-x")
 
+    if args.clean:
+        _clean = True
+
     _start_cwd = os.getcwd()
     _relpath = ""
 
@@ -1122,7 +1146,7 @@ if __name__ == '__main__':
     _job_server_pool = jobserver.JobServerPool(args.jobs or 1)
 
     globalize(["_prio", "_unbound_targets", "_build_queue", "_targets", "_post_parse", "_post_bind", "_pre_build",
-        "_created_files",])
+        "_created_files", "_clean_leftovers"])
 
     # filter VAR=val from targets
     filter_vars(args.targets)
