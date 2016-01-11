@@ -10,6 +10,15 @@ definitely were no fun to work with, maintain and extend.
 PyJam uses many concepts of Perforce's jam, but combines them with the power of
 Python as language for the build files.
 
+PyJam has primarily been developed for the RIOT OS (riot-os.org), which needs
+to build ~100 examples for around 40 platforms, selected from ~300kLOC, with
+dozens of modules (think libraries) with source-level interdependencies. While
+it's make-based build system worked fairly well, with time it got harder to
+maintain, and a full CI build would take several hours, badly utilizing caching
+& parallel building.  The goal of PyJam was to get CI responses in under 5
+minutes while keeping the actual build files as readable and maintainable as
+possible.
+
 Some alternatives didn't suit my needs:
 
 - CMake's idea of creating makefiles from another type of syntax didn't please
@@ -19,6 +28,29 @@ Some alternatives didn't suit my needs:
 - SCons is still stuck at python 2.x, which, while practically probably not
   much of a problem, made me feel outdated even when just starting to use it.
   But PyJam's Object-based syntax looks similar.
+
+- ninja needs something to create it's actual build files. It might be possible
+  to use PyJam to express complex builds and then use ninja as build engine,
+  but PyJam's integrated build scheduler is quite fast, so there's not much to
+  gain.
+
+- tup has many nice ideas (and serves as inspiration), but it's syntax seems
+  foreign, and didn't encourage me to even try to implement a complex module
+  system with it. But if you're interested in planned features for PyJam,
+  read Mike Shal's Build System Rules and Algorithms.
+  (http://gittup.org/tup/build_system_rules_and_algorithms.pdf)
+
+## Features
+
+- buildfiles are essentially Python files
+- parallel building
+- powerful "module" system (think libraries) with dependencies
+- express module dependencies using boolean syntax
+- override variables per target, executable, module
+- extensive debugging
+- automatically clean-up old files
+- automatic C header file dependencies
+- GPLv2 licensed
 
 ## Requirements
 
@@ -50,6 +82,9 @@ $ pyj
 ... updated 3 target(s) ...
 $
 ```
+
+You might wonder, "Why did it update 3 targets?". That's because "all" counts as target,
+depending on the two files that actually got created.
 
 ## Building a project with PyJam
 
