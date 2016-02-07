@@ -42,6 +42,8 @@ _pre_build = []
 _debug_levels = { 'error', 'warning', 'default' }
 _valid_debug_levels = {'binding', 'clean', 'include', 'targets', 'depends', 'exports', 'env', 'threads', 'verbose', 'needed', 'context', 'locate', 'cause', 'commands', 'phases', 'warning', 'error', 'debug', 'times'}
 
+_skipped = []
+
 # variable export settings
 _var_exports = set()
 _var_unexports = set()
@@ -60,17 +62,16 @@ _include_stack = []
 _cwd_stack = []
 _include_cache = {}
 
-builders={}
-
 _globals = globals()
 
+# threads
 _thread_local = None
 _exit_threads = False
 
+# directories
 _basedir = None
 _bindir = None
 _relpath = None
-
 _start_cwd = None
 
 # build queue
@@ -803,7 +804,7 @@ def worker(queue, block=False, n=0):
                 if not success:
                     needed_for.missing.append(target.name)
                     if needed_for.is_needed():
-                        dprint("default", "... skipped %s for lack of %s..." % (needed_for.name, target))
+                        _skipped.append((needed_for.name, target))
                 else:
                     needed_for.ndeps -= 1
                     if needed_for.prio != -1:
@@ -1186,6 +1187,9 @@ if __name__ == '__main__':
     _build_queue.join()
     after = time.time()
     dprint("times", "... building took %.3fs" % (after - before))
+
+    for target, missing in _skipped:
+        dprint("default", "... skipped %s for lack of %s..." % (target, missing))
 
     dprint("default", "... updated", Target._updated, "target(s) ...")
     clean_exit(0)
