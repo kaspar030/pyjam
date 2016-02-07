@@ -1139,9 +1139,17 @@ if __name__ == '__main__':
     pp = pprint.PrettyPrinter(indent=4)
 
     # locate project base buildfile
-    if not (os.path.isfile("project.py") or locate_basedir()):
-        print("pyjam: Error: project.py not found (searched in current path and every paths up to \"/\")")
-        clean_exit(1)
+    if not os.path.isfile("project.py"):
+        found = False
+        try:
+            locate_basedir()
+            found = True
+        except BasedirNotFoundException:
+            pass
+
+        if not found:
+            print("pyjam: project.py not found (searched in current path and all parent directories up to \"/\")")
+            clean_exit(1)
 
     # instantiate jobserver subprocess
     _job_server_pool = jobserver.JobServerPool(args.jobs or 1)
