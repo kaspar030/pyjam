@@ -64,6 +64,10 @@ _include_cache = {}
 
 _globals = globals()
 
+# build file modification time
+_newest_target = 0
+_newest_buildfile = 0
+
 # threads
 _thread_local = None
 _exit_threads = False
@@ -413,6 +417,9 @@ class Target(object):
                     s.rebuild=True
                 else:
                     mtime = s.update_mtime()
+                    if mtime:
+                        global _newest_target
+                        _newest_target = max(s.mtime, _newest_target)
 
         s.update_deps(True)
 
@@ -612,6 +619,8 @@ class FileTarget(Target):
         elif not s.update_mtime():
     #        print("non_existant", s.name)
             s.rebuild=True
+        elif s.mtime < _newest_buildfile and (s.name in _non_source_targets):
+            s.rebuild = True
         else:
             s.rebuild = super().check_update()
 
@@ -887,7 +896,7 @@ def subdir():
         raise StartedInSubdirException()
 
 def include(filename):
-    global _relpath, _included_set, _include_stack, _cwd_stack, _include_cache
+    global _relpath, _included_set, _include_stack, _cwd_stack, _include_cache, _newest_buildfile
     fullpath = os.path.abspath(filename)
     if False and fullpath in _included_set:
         dprint("include", "Already included", fullpath)
@@ -906,6 +915,9 @@ def include(filename):
 
         code = _include_cache.get(fullpath)
         if not code:
+            stat = os.stat(fullpath)
+            if stat:
+                _newest_buildfile = max(stat.st_mtime, _newest_buildfile)
             with open(fullpath) as f:
                 code = compile(f.read(), fullpath, 'exec')
                 _include_cache[fullpath] = code
