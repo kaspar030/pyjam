@@ -74,7 +74,8 @@ class Module(Rule):
     _used = set()
 
     def is_used(name):
-        module = Module._map.get(locate_bin(name)[0])
+        global _tmp
+        module = Module._map.get(locate_bin(name, _tmp)[0])
         if module:
             dprint("debug", "USE_IF is_used", module.name, ":", module.used)
             return module.used
@@ -210,7 +211,7 @@ class Module(Rule):
             for module, condition in context._use_if_list:
                 if module.used:
                     continue
-                if module._process_use_if_hook(condition):
+                if module._process_use_if_hook(condition, context):
 #                    context._use_if_selected.append(module)
                     has_changed = True
                 else:
@@ -218,9 +219,17 @@ class Module(Rule):
             if has_changed:
                 context._use_if_list = new_list
 
-    def _process_use_if_hook(s, string):
+    def _process_use_if_hook(s, string, context):
         if not s.used:
             dprint("debug", "USE_IF processing", s.name, string)
+
+            # need to pass context to boolparse / is_used() so
+            # is_used() can use locat_bin() on the module name
+            # (the hook is being executed after possible ctx change)
+
+            global _tmp
+            _tmp= context
+
             res = Module.bool_parser.parseString(string)[0]
             if bool(res):
                 s._use()
