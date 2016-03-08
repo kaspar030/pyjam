@@ -8,7 +8,7 @@ import pprint
 import subprocess
 import sys
 import traceback
-import jobserver
+import cmdserver
 import time
 
 from os.path import abspath, dirname, basename
@@ -83,7 +83,7 @@ _prio = 0
 _build_queue = None
 
 # ForkServer
-_job_server_pool = None
+_cmd_server_pool = None
 
 class StartedInSubdirException(Exception):
     def __init__(s):
@@ -988,7 +988,7 @@ def shell(commands, env=None):
     if not env:
         env = _env()
 
-    handle = _job_server_pool.runcmd(_shell_options + [commands], env=env, shell=True)
+    handle = _cmd_server_pool.runcmd(_shell_options + [commands], env=env, shell=True)
     output, result = handle.wait()
     return result
 
@@ -1098,8 +1098,8 @@ def check_depends():
 
 def clean_exit(code=0):
     os.chdir(_start_cwd)
-    if _job_server_pool:
-        _job_server_pool.destroy()
+    if _cmd_server_pool:
+        _cmd_server_pool.destroy()
     sys.exit(code)
 
 def _err(*args):
@@ -1163,8 +1163,8 @@ if __name__ == '__main__':
             print("pyjam: project.py not found (searched in current path and all parent directories up to \"/\")")
             clean_exit(1)
 
-    # instantiate jobserver subprocess
-    _job_server_pool = jobserver.JobServerPool(args.jobs or 1)
+    # instantiate cmdserver subprocess
+    _cmd_server_pool = cmdserver.CmdServerPool(args.jobs or 1)
 
     globalize(["_prio", "_unbound_targets", "_build_queue", "_targets", "_post_parse", "_post_bind", "_pre_build",
         "_created_files", "_clean_leftovers"])

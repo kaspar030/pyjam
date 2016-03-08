@@ -1,7 +1,12 @@
 # python's subprocess creation speed depends on the main processes memory consumption
 # (due to mmap'ing magic). So with a million targets, pyjam's overhead for calling "true"
-# goes from 3ms to 20ms. Using this jobserver class, the speed stays constant at 3.7ms.
+# goes from 3ms to 20ms. Using this cmdserver class, the speed stays constant at 3.7ms.
 # (measured on my thinkpad x220 core i5).
+#
+# The class also provides an easy API to run commands in a subprocess, gathering it's output,
+# and provides a way of killing it.
+# Part of this will be obsolete as soon as everyone can use Python 3.5 subprocess.run().
+#
 
 from multiprocessing import Process, Queue
 from subprocess import Popen, PIPE, STDOUT
@@ -9,7 +14,7 @@ import signal
 from collections import deque
 import os
 
-class JobHandle(object):
+class CmdHandle(object):
     def __init__(s, queue, pid, pool, server):
         s.queue = queue
         s.pid = pid
@@ -29,11 +34,11 @@ class JobHandle(object):
         os.killpg(os.getpgid(s.pid), signal)
         return s.wait()
 
-class JobServer(object):
+class CmdServer(object):
     def __init__(s, pool):
         s.inQueue = Queue()
         s.outQueue = Queue()
-        s.cmdHostProcess = Process(target=JobServer.cmdloop, args=(s, s.inQueue, s.outQueue, pool), daemon=True)
+        s.cmdHostProcess = Process(target=CmdServer.cmdloop, args=(s, s.inQueue, s.outQueue, pool), daemon=True)
         s.cmdHostProcess.start()
 
     def cmdloop(s, inQueue, outQueue, pool):
@@ -56,11 +61,11 @@ class JobServer(object):
     def killCmdHostProcess(s):
         s.cmdHostProcess.terminate()
 
-class JobServerPool(object):
+class CmdServerPool(object):
     def __init__(s, n):
         s.pool = deque()
         for i in range(0, n):
-            s.pool.append(JobServer(s.pool))
+            s.pool.append(CmdServer(s.pool))
 
     def destroy(s):
         while s.pool:
@@ -69,4 +74,4 @@ class JobServerPool(object):
     def runcmd(s, *args, **kwargs):
         server = s.pool.pop()
         queue, pid = server.runcmd(*args, **kwargs)
-        return JobHandle(queue, pid, s.pool, server)
+        return CmdHandle(queue, pid, s.pool, server)
