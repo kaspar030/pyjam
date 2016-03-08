@@ -988,8 +988,8 @@ def shell(commands, env=None):
     if not env:
         env = _env()
 
-    output, result = _job_server_pool.callCommand(_shell_options + [commands], env)
-
+    handle = _job_server_pool.runcmd(_shell_options + [commands], env=env, shell=True)
+    output, result = handle.wait()
     return result
 
 def globalize(fields):
