@@ -33,11 +33,6 @@ _dir_exists = set()
 _clean_leftovers = False
 _clean = False
 
-# hooks
-_post_parse = []
-_post_bind = []
-_pre_build = []
-
 # debug options
 _debug_levels = { 'error', 'warning', 'default' }
 _valid_debug_levels = {'binding', 'clean', 'include', 'targets', 'depends', 'exports', 'env', 'threads', 'verbose', 'needed', 'context', 'locate', 'cause', 'commands', 'phases', 'warning', 'error', 'debug', 'times'}
@@ -525,12 +520,6 @@ class Target(object):
                 return True #s.can_make()
         return False
 
-    def set_stable(name):
-        _pre_build.append((Target._set_stable_hook, (name,)))
-
-    def _set_stable_hook(name):
-        Target.get(name).prepare()
-
     def depends(s, targets):
         targets = listify(targets)
         for target in targets:
@@ -714,30 +703,6 @@ def bind_targets():
         bind_target(utarget)
     _unbound_targets = []
 
-def call_hooks(list):
-    for hook, params in list:
-        hook(*params)
-
-def post_parse():
-    global _post_parse
-    call_hooks(_post_parse)
-    _post_parse = []
-
-def post_bind():
-    global _post_bind
-    call_hooks(_post_bind)
-    _post_bind = []
-
-def pre_build():
-    global _pre_build
-    call_hooks(_pre_build)
-    _pre_build = []
-
-def post_prepare():
-    global _post_prepare
-    call_hooks(_post_prepare)
-    _post_prepare = []
-
 def start_workers():
     global _build_queue
     _build_queue = PriorityQueue()
@@ -861,6 +826,7 @@ def select_wanted(set_stable=False):
             if target.wanted:
                 print("wanted skipping already processed", target_name)
                 continue
+
             target.wanted=True
             dprint("verbose", "... want target", target_name)
             if not target in _wanted:
@@ -1113,22 +1079,15 @@ def start_building(all=False):
         do_clean_leftovers()
 
     a = time.time()
-    post_parse()
-    b = time.time()
     bind_targets()
-    c = time.time()
-    post_bind()
-    d = time.time()
-    pre_build()
-    e = time.time()
+    b = time.time()
     select_wanted(all)
-    f = time.time()
+    c = time.time()
     build_targets(all)
-    g = time.time()
+    d = time.time()
 
-    dprint("times", "... times: post_parse: %.3fs binding: %.3fs, post_bind: %.3fs "
-                    "pre_build: %.3f sselect_wanted: %.3fs building: %.3fs" %
-            (b-a, c-b, d-c, e-d, f-e, g-f))
+    dprint("times", "... times: binding: %.3f select_wanted: %.3fs building: %.3fs" %
+            (b-a, c-b, d-c))
 
 if __name__ == '__main__':
     args = parse_args()

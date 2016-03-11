@@ -29,6 +29,26 @@ def set_context(context):
     global ctx
     ctx = context
 
+class BuildContext(object):
+    def init(name, bindir=None, parent=None):
+        if not parent:
+            parent = default
+
+        set_context(Context(name, parent))
+
+        if bindir:
+            ctx.bindir = bindir
+
+        ctx._hooks = []
+        ctx._hooks.append((1, Module._process_context, ()))
+
+    def finalize():
+        dprint("verbose", " ... running hooks for build context \"%s\"..." % ctx._name)
+        for prio, hook, args in sorted(ctx._hooks, key=lambda x: x[0]):
+            hook(*args)
+
+        start_building()
+
 class Rule(object):
     def __init__(s, targets, sources, **kwargs):
         global ctx
@@ -70,12 +90,11 @@ class Main(Rule):
         depends("all", s.targets)
 
 class Module(Rule):
-    _map = {}
-    _used = set()
+    def init_context():
+        ctx._module_map = {}
 
     def is_used(name):
-        global _tmp
-        module = Module._map.get(locate_bin(name, _tmp)[0])
+        module = ctx._module_map.get(locate_bin(name)[0])
         if module:
             dprint("debug", "USE_IF is_used", module.name, ":", module.used)
             return module.used
@@ -106,10 +125,10 @@ class Module(Rule):
         kwargs.pop("context", None)
         s.add_sources(s.sources)
 
-        if s.name in Module._map:
+        if s.name in ctx._module_map:
             dprint("warning", "Warning: redefining module %s!" % s.name)
 
-        Module._map[s.name]=s
+        ctx._module_map[s.name]=s
 
         s.context.defines += s.get_define()
 
@@ -145,7 +164,7 @@ class Module(Rule):
 
         res.extend(s.objects)
         for module in s._uses:
-            module = Module._map.get(module)
+            module = ctx._module_map.get(module)
             if module and module.used:
                 res.extend(module.get_objects(visited, False))
 
@@ -164,7 +183,7 @@ class Module(Rule):
             yield s
 
         for module in s._uses:
-            module = Module._map.get(module)
+            module = ctx._module_map.get(module)
             if module and module.used:
                 for dep in module.iterate_modules(visited):
                     yield dep
@@ -188,47 +207,38 @@ class Module(Rule):
         return s.needs(modules, False, locate)
 
     def collect_modules(s):
-        _post_parse.insert(0, (s._use, ()))
-#        _pre_build.append((Module._use_conditionals_hook, (ctx,)))
+        ctx._hooks.insert(0, (0, s._use, ()))
         return s
-
-#    def _use_conditionals_hook(context):
-#        for module in context._use_if_selected or []:
 
     def use_if(s, string):
         if not ctx._use_if_list:
             ctx._use_if_list = []
-            _post_parse.append((Module.process_use_if_list, (ctx,)))
+            ctx._hooks.append((0, Module.process_use_if_list, ()))
         ctx._use_if_list.append((s, string))
         return s
 
-    def process_use_if_list(context):
+    def process_use_if_list():
         has_changed = True
-#       context._use_if_selected = []
         while has_changed:
             new_list = []
             has_changed = False
-            for module, condition in context._use_if_list:
+            for module, condition in ctx._use_if_list:
                 if module.used:
                     continue
-                if module._process_use_if_hook(condition, context):
-#                    context._use_if_selected.append(module)
+                if module._process_use_if_hook(condition):
                     has_changed = True
                 else:
                     new_list.append((module, condition))
             if has_changed:
-                context._use_if_list = new_list
+                ctx._use_if_list = new_list
 
-    def _process_use_if_hook(s, string, context):
+    def _process_use_if_hook(s, string):
         if not s.used:
             dprint("debug", "USE_IF processing", s.name, string)
 
             # need to pass context to boolparse / is_used() so
             # is_used() can use locat_bin() on the module name
             # (the hook is being executed after possible ctx change)
-
-            global _tmp
-            _tmp= context
 
             res = Module.bool_parser.parseString(string)[0]
             if bool(res):
@@ -246,7 +256,7 @@ class Module(Rule):
         s.used = True
 
         for module_name in s._uses:
-            module = Module._map.get(module_name)
+            module = ctx._module_map.get(module_name)
             if not module:
                 if module_name in s._uses_hard:
                     _err("module", s.name, "needs unknown module", module_name)
@@ -258,19 +268,21 @@ class Module(Rule):
                 if module_name in s._uses_hard:
                     module._use()
 
-    def _process_contexts():
-        for module_name, module in Module._map.items():
+    def _process_context():
+        for module_name, module in ctx._module_map.items():
             if module.used:
                 dprint("debug", "_CTX processing", module.name)
                 for dep in module._uses:
                     dprint("debug", " ctx", dep)
-                    dep = Module._map.get(dep)
+                    dep = ctx._module_map.get(dep)
                     if dep:
                         if dep.used:
                             dprint("debug", "+CTX", module.name, dep.name)
                             module.context._parents.append(dep.context)
                         else:
                             dprint("debug", "-CTX", module.name, dep.name)
+
+        return True
 
     def _print_module_deps():
         print("Module dependencies:")
@@ -279,13 +291,13 @@ class Module(Rule):
             unused = []
             print("strict digraph \"Module dependencies\" {", file=f)
             print("concentrate=true;", file=f)
-            for module_name, module in Module._map.items():
+            for module_name, module in ctx._module_map.items():
                 if module.used:
                     for dep in module._uses:
                         if dep in module._uses_hard:
                             print("\"%s\" -> \"%s\";" % (basename(module_name), basename(dep)), file=f)
                         else:
-                            dep_obj = Module._map.get(dep)
+                            dep_obj = ctx._module_map.get(dep)
                             if dep_obj and dep_obj.used:
                                 print("\"%s\" -> \"%s\" [arrowhead=\"dot\"];" % (basename(module_name), basename(dep)), file=f)
                 else:
@@ -470,14 +482,14 @@ class LinkModule(Tool):
         s.modules = listify(sources)
         super().__init__(target, **kwargs)
 
-        entry = (s.pre_build, ())
-        if not entry in _pre_build:
-            _pre_build.insert(0, entry)
+        entry = (2, s.pre_build, ())
+        if not entry in ctx._hooks:
+            ctx._hooks.insert(0, entry)
 
     def pre_build(s):
         objects = []
         for module in s.modules:
-            module = Module._map.get(module)
+            module = ctx._module_map.get(module)
             if not module:
                 continue
 
@@ -549,6 +561,3 @@ class Fail(Rule):
 
     def build(s, target):
         return False
-
-def setup_rule_hooks():
-    _post_bind.append((Module._process_contexts, ()))
