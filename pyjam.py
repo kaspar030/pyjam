@@ -572,7 +572,7 @@ class Target(object):
             if dep._yield_if(stable, queued):
                 yield(dep)
 
-def PhonyTarget(name):
+def VirtualTarget(name):
     tmp = Target(name)
     tmp.bound=True
     return tmp

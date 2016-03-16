@@ -17,9 +17,9 @@ default.CFLAGS=''
 
 global_export(['CC', 'LINK', 'AS', 'AR', 'CFLAGS', 'LINKFLAGS'])
 
-PhonyTarget('all')
-PhonyTarget('first')
-PhonyTarget('clean')
+VirtualTarget('all')
+VirtualTarget('first')
+VirtualTarget('clean')
 
 depends('first', 'all')
 
