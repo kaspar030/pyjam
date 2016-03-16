@@ -48,9 +48,9 @@ class CmdServer(object):
             kwargs["stdout"] = PIPE
             process = Popen(*args, **kwargs)
             outQueue.put(process.pid)
-            output = ""
+            output = u""
             with process:
-                output += str(process.stdout.read())
+                output += process.stdout.read().decode("utf-8", "replace")
             outQueue.put((output, process.returncode))
 
     def runcmd(s, *args, **kwargs):
