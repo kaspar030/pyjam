@@ -47,7 +47,8 @@ class BuildContext(object):
         for prio, hook, args in sorted(ctx._hooks, key=lambda x: x[0]):
             hook(*args)
 
-        start_building()
+#       parallel building/parsing not ready
+#        start_building()
 
 class Rule(object):
     def __init__(s, targets, sources, **kwargs):
