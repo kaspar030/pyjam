@@ -956,8 +956,7 @@ def shell(commands, env=None):
 
     handle = _cmd_server_pool.runcmd(_shell_options + [commands], env=env, shell=True)
     output, result = handle.wait()
-    if result!=0 or "commands" in _debug_levels:
-        print(output.rstrip())
+    print(output, end="")
     return result
 
 def globalize(fields):
